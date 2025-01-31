@@ -1,0 +1,521 @@
+---
+title: "LA Fires Property Damage by Census Tracts"
+author: "Annie Rosenow"
+format: html
+editor: visual
+---
+
+
+```{r}
+#| echo: false
+library(here)
+library(janitor)
+library(stringr)
+library(urbnindicators)
+library(writexl)
+library(dplyr)
+library(urbnthemes)
+library(ggplot2)
+library(tidycensus)
+```
+
+
+```{r}
+#| echo: false
+eaton_fire_block_groups1 = read.csv(here("data", "data-raw", "eaton_properties_block_groups_1_29.csv")) 
+eaton_fire_census_tracts1 = read.csv(here("data", "data-raw", "eaton_properties_census_tracts_1_29.csv"))
+palisades_fire_block_groups1 = read.csv(here("data", "data-raw", "palisades_properties_block_groups_1_29.csv"))
+palisades_fire_census_tracts1 = read.csv(here("data", "data-raw", "palisades_properties_census_tracts_1_29.csv"))
+```
+
+```{r}
+#| echo: false
+#Cleaning data 
+palisades_fire_census_tracts <- palisades_fire_census_tracts1 %>% mutate(FIPS = str_pad(FIPS, 11, "left", "0"))%>% clean_names() %>%
+  select(-c(target_fid, join_fid, join_count, join_count_1, join_count_12, join_count_12_13, target_fid_1, target_fid_12, target_fid_12_13, descriptio, dbgis_user2_dist_drp_city_c_2, perimeter, gplan_index2,gplan_index2_id, city, city, symbol_colorname, comp_no, symbol, zcip_phase, sq_miles, area_1, dbgis_user2_dist_drp_city_c_20, shape_length, shape_area)) %>% 
+  rename( 
+    population_2022 = population, 
+    pop22_sqmi = pop_sqmi, 
+    community = name, 
+    neighborhood_name = name_1,
+    la_co_planning_name = name_12) %>% 
+  mutate(fire_name = "Palisades")
+
+eaton_fire_census_tracts <- eaton_fire_census_tracts1 %>% mutate(FIPS = str_pad(FIPS, 11, "left", "0")) %>% 
+  clean_names() %>%
+  select(-c(join_count, target_fid, join_fid, join_count_1, target_fid_1, join_count_12, target_fid_12, join_count_12_13, target_fid_12_13, descriptio, dbgis_user2_dist_drp_city_c_2, perimeter, gplan_index2,gplan_index2_id, city, city, symbol_colorname, comp_no, symbol, zcip_phase, sq_miles, area_1, dbgis_user2_dist_drp_city_c_20, shape_length, shape_area)) %>% 
+  rename( 
+    population_2022 = population, 
+    pop22_sqmi = pop_sqmi, 
+    community = name, 
+    neighborhood_name = name_1,
+    la_co_planning_name = name_12)%>% 
+  mutate(fire_name = "Eaton")
+
+##BLOCK GROUPS
+
+# palisades_fire_block_groups <- palisades_fire_block_groups1 %>% 
+#   mutate(
+#   FIPS = str_pad(FIPS, 12, "left", "0"))%>% 
+#   clean_names() %>%
+#   select(-c(target_fid, join_fid, join_count, join_count_1, join_count_12, join_count_12_13, target_fid_1, target_fid_12, target_fid_12_13, descriptio, dbgis_user2_dist_drp_city_c_2, perimeter, gplan_index2,gplan_index2_id, city, city, symbol_colorname, comp_no, symbol, zcip_phase, sq_miles, area_1, dbgis_user2_dist_drp_city_c_20, shape_length, shape_area)) %>% 
+#   rename( 
+#     population_2022 = population, 
+#     pop22_sqmi = pop_sqmi, 
+#     community = name, 
+#     neighborhood_name = name_1,
+#     la_co_planning_name = name_12)
+    
+# eaton_fire_block_groups <- eaton_fire_block_groups1 %>%
+#   mutate(
+#   FIPS= paste(STCOFIPS,TRACT_FIPS,BLOCKGROUP_FIPS, sep = ""),
+#   FIPS = str_pad(FIPS, 12, "left", "0"))%>% 
+#   clean_names() %>%
+#   select(-c(join_count, target_fid, join_fid, join_count_1, target_fid_1, join_count_12, target_fid_12, join_count_12_13, target_fid_12_13, descriptio, dbgis_user2_dist_drp_city_c_2, perimeter, gplan_index2,gplan_index2_id, city, city, symbol_colorname, comp_no, symbol, zcip_phase, sq_miles, area_1, dbgis_user2_dist_drp_city_c_20, shape_length, shape_area)) %>% 
+#   rename( 
+#     population_2022 = population, 
+#     pop22_sqmi = pop_sqmi, 
+#     community = name, 
+#     neighborhood_name = name_1,
+#     la_co_planning_name = name_12)
+
+```
+
+
+Summary of damaged properties per census tract 
+```{r}
+#| echo: false
+
+la_fires_properties <- rbind(palisades_fire_census_tracts, eaton_fire_census_tracts) %>% 
+  mutate( damage_scale = case_when(
+    damage == "No Damage" ~ "No Damage",  
+    damage == "Affected (1-9%)" ~ "Minor Damage",
+    damage == "Minor (10-25%)" ~ "Minor Damage",
+    damage == "Major (26-50%)" ~ "Major Damage", 
+    damage == "Destroyed (>50%)" ~ "Destroyed",
+    damage == "Inaccessible" ~ "Inaccessible"), 
+    housing_type = case_when(
+    structuretype %in% c("Church", "School", "Utility Misc Structure", "Commercial Building Single Story", 
+                    "Commercial Building Multi Story", "Infrastructure", "Hospital") ~ "Non residential", 
+    structuretype == "Mixed Commercial/Residential" ~"Mixed Commercial/Residential", 
+    structuretype == "Motor Home" ~ "Motor Home",
+    structuretype %in% c("Multi Family Residence Single Story", "Multi Family Residence Multi Story") ~ "Multifamily residential",
+    structuretype %in% c("Mobile Home Single Wide", "Mobile Home Double Wide", "Mobile Home Triple Wide") ~ "Manufactured Housing",
+    structuretype %in% c("Single Family Residence Multi Story", "Single Family Residence Single Story") ~ "Single family residential",  TRUE ~ NA_character_ ))
+
+```
+
+```{r}
+#| echo: false
+la_fires_tracts <- la_fires_properties %>%
+  select(fire_name, state_fips, county_fips, stcofips, tract_fips, fips) %>%
+  distinct() 
+```
+
+
+#Summary tables of property damage by census tract
+```{r}
+#| echo: true
+la_fires_properties_table <- la_fires_properties %>% 
+  group_by(tract_fips) %>% 
+  summarise(
+    fire_name = first(fire_name),
+    destroyed = sum(damage_scale == "Destroyed"),
+    major_damage = sum(damage_scale == "Major Damage"),
+    minor_damage = sum(damage_scale == "Minor Damage"),
+    no_damage = sum(damage_scale == "No Damage"),
+    inaccessible = sum(damage_scale == "Inaccessible")
+  ) %>% arrange(fire_name, desc(destroyed), desc(major_damage), desc(minor_damage), desc(no_damage),desc(inaccessible))
+print(la_fires_properties_table)
+```
+
+
+```{r}
+#| echo: false
+eaton_fire_tracts_table <- la_fires_properties %>% 
+  filter(fire_name == "Eaton") %>% 
+  group_by(tract_fips) %>% 
+  summarise(
+    no_damage = sum(damage_scale == "No Damage"),
+    minor_damage = sum(damage_scale == "Minor Damage"),
+    major_damage = sum(damage_scale == "Major Damage"),
+    destroyed = sum(damage_scale == "Destroyed"),
+    inaccessible = sum(damage_scale == "Inaccessible"),
+    .groups = "drop"
+  )
+
+#write_xlsx(eaton_fire_tracts_table, "eaton_fire_census_tracts_summary.xlsx")
+
+palisades_fire_tracts_table <- la_fires_properties %>% 
+  filter(fire_name == "Palisades") %>% 
+  group_by(tract_fips) %>% 
+  summarise(
+    no_damage = sum(damage_scale == "No Damage"),
+    minor_damage = sum(damage_scale == "Minor Damage"),
+    major_damage = sum(damage_scale == "Major Damage"),
+    destroyed = sum(damage_scale == "Destroyed"),
+    inaccessible = sum(damage_scale == "Inaccessible"),
+    .groups = "drop"
+  )
+
+#write_xlsx(palisades_fire_tracts_table, "palisades_fire_tracts_table.xlsx")
+```
+
+```{r}
+#| echo: false
+#getting housing counts per census tract
+housing_unit_var <- c(total_housing_units_acs = "B25034_001")
+
+acs_housing_counts <- get_acs(
+  geography = "tract",
+  variables = housing_unit_var, 
+  year = 2022,
+  state = "CA",
+  county = 037,
+  survey = "acs5",
+  geometry = FALSE,
+  output = "wide") %>% 
+  clean_names() %>% 
+  rename_with(~sub("_e$", "", .), ends_with("_e")) %>%
+  select(-ends_with("_m")) 
+
+la_fires_properties_housing_counts <- la_fires_properties %>%
+  left_join(acs_housing_counts %>% filter(geoid %in% la_fires_tracts$fips), by = c("fips" = "geoid"))
+```
+
+#Destroyed properties by structure type and census tracts
+```{r}
+#| echo: true
+destroyed_by_tract <- la_fires_properties_housing_counts %>%
+  filter(damage_scale == "Destroyed") %>% 
+  select(fire_name, tract_fips,  city_comm_name, neighborhood_name, jurisdiction, housing_type, total_housing_units_acs) %>%
+group_by(tract_fips) %>% 
+  summarise(
+   fire_name = first(fire_name),
+   unincorporated_properties_dins = sum(jurisdiction == "UNINCORPORATED AREA", na.rm = TRUE),
+   incorporated_properties_dins = sum(jurisdiction =="INCORPORATED CITY", na.rm = TRUE),
+   incorporated_share_dins = sum(jurisdiction == "INCORPORATED CITY", na.rm = TRUE)/ n(), 
+   intersecting_city = toString(unique(city_comm_name)),
+   intersecting_neighbrohood = toString(unique(neighborhood_name)),
+   total_housing_acs = first(total_housing_units_acs),
+   single_family = sum(housing_type == "Single family residential"),
+   multi_family = sum(housing_type == "Multifamily residential"),
+   manufactured_housing = sum(housing_type == "Manufactured Housing"), 
+   mixed_commercial_residential = sum(housing_type == "Mixed Commercial/Residential"),
+   motor_home = sum(housing_type ==  "Motor Home"),
+   non_residential = sum(housing_type == "Non residential"),
+   total_residential_properties_dins = sum(single_family + multi_family +manufactured_housing +  mixed_commercial_residential +  motor_home ),
+   total_properties_dins = n(),
+   difference_acs_dins_residential = total_housing_acs - total_residential_properties_dins, 
+   per_destroyed_residential_properties = total_residential_properties_dins / total_housing_acs,
+   per_singlefamily = single_family/total_housing_acs,
+   per_multifamily = multi_family/total_housing_acs,
+   per_manufactured_housing = multi_family/total_housing_acs,
+   per_mixed_commercial_residential = mixed_commercial_residential/total_housing_acs,
+   per_motor_home = motor_home/total_housing_acs) %>% arrange(fire_name, desc(per_destroyed_residential_properties))
+   
+print(destroyed_by_tract)
+
+```
+
+#Major Damage properties by structure type and census tracts
+```{r}
+#| echo: true
+major_damage_by_tract <- la_fires_properties_housing_counts %>%
+  filter(damage_scale == "Major Damage") %>% 
+  select(fire_name, tract_fips,  city_comm_name, neighborhood_name, jurisdiction, housing_type, total_housing_units_acs) %>%
+group_by(tract_fips) %>% 
+  summarise(
+   fire_name = first(fire_name),
+   unincorporated_properties_dins = sum(jurisdiction == "UNINCORPORATED AREA", na.rm = TRUE),
+   incorporated_properties_dins = sum(jurisdiction =="INCORPORATED CITY", na.rm = TRUE),
+   incorporated_share_dins = sum(jurisdiction == "INCORPORATED CITY", na.rm = TRUE)/ n(), 
+   intersecting_city = toString(unique(city_comm_name)),
+   intersecting_neighbrohood = toString(unique(neighborhood_name)),
+   total_housing_acs = first(total_housing_units_acs),
+   single_family = sum(housing_type == "Single family residential"),
+   multi_family = sum(housing_type == "Multifamily residential"),
+   manufactured_housing = sum(housing_type == "Manufactured Housing"), 
+   mixed_commercial_residential = sum(housing_type == "Mixed Commercial/Residential"),
+   motor_home = sum(housing_type ==  "Motor Home"),
+   non_residential = sum(housing_type == "Non residential"),
+   total_residential_properties_dins = sum(single_family + multi_family +manufactured_housing +  mixed_commercial_residential +  motor_home ),
+   total_properties_dins = n(),
+   difference_acs_dins_residential = total_housing_acs - total_residential_properties_dins, 
+   per_major_damage_residential_properties = total_residential_properties_dins / total_housing_acs,
+   per_singlefamily = single_family/total_housing_acs,
+   per_multifamily = multi_family/total_housing_acs,
+   per_manufactured_housing = multi_family/total_housing_acs,
+   per_mixed_commercial_residential = mixed_commercial_residential/total_housing_acs,
+   per_motor_home = motor_home/total_housing_acs) %>% arrange(fire_name, desc(per_major_damage_residential_properties))
+
+print(major_damage_by_tract)
+```
+
+#Minor Damage properties by structure type and census tracts
+```{r}
+#| echo: true
+minor_damage_by_tract <- la_fires_properties_housing_counts %>%
+  filter(damage_scale == "Minor Damage") %>% 
+  select(fire_name, tract_fips,  city_comm_name, neighborhood_name, jurisdiction, housing_type, total_housing_units_acs) %>%
+group_by(tract_fips) %>% 
+  summarise(
+   fire_name = first(fire_name),
+   unincorporated_properties_dins = sum(jurisdiction == "UNINCORPORATED AREA", na.rm = TRUE),
+   incorporated_properties_dins = sum(jurisdiction =="INCORPORATED CITY", na.rm = TRUE),
+   incorporated_share_dins = sum(jurisdiction == "INCORPORATED CITY", na.rm = TRUE)/ n(), 
+   intersecting_city = toString(unique(city_comm_name)),
+   intersecting_neighbrohood = toString(unique(neighborhood_name)),
+   total_housing_acs = first(total_housing_units_acs),
+   single_family = sum(housing_type == "Single family residential"),
+   multi_family = sum(housing_type == "Multifamily residential"),
+   manufactured_housing = sum(housing_type == "Manufactured Housing"), 
+   mixed_commercial_residential = sum(housing_type == "Mixed Commercial/Residential"),
+   motor_home = sum(housing_type ==  "Motor Home"),
+   non_residential = sum(housing_type == "Non residential"),
+   total_residential_properties_dins = sum(single_family + multi_family +manufactured_housing +  mixed_commercial_residential +  motor_home ),
+   total_properties_dins = n(),
+   difference_acs_dins_residential = total_housing_acs - total_residential_properties_dins, 
+   per_minor_damage_residential_properties = total_residential_properties_dins / total_housing_acs,
+   per_singlefamily = single_family/total_housing_acs,
+   per_multifamily = multi_family/total_housing_acs,
+   per_manufactured_housing = multi_family/total_housing_acs,
+   per_mixed_commercial_residential = mixed_commercial_residential/total_housing_acs,
+   per_motor_home = motor_home/total_housing_acs) %>% arrange(fire_name, desc(per_minor_damage_residential_properties))
+
+print(minor_damage_by_tract)
+
+
+```
+
+
+
+```{r}
+#| echo: false
+#Pulling ACS Variables for Tracts 
+#LA County tract variables
+la_county_tracts = compile_acs_data(
+    variables = NULL,
+    years = c(2022),
+    geography = "tract",
+    states = "CA",
+    spatial = FALSE) 
+
+# #joining acs data to census tracts 
+palisades_acs_tracts <- p_census_tracts %>%
+ left_join(la_county_tracts %>% filter(GEOID %in% p_census_tracts$fips), by = c("fips" = "GEOID"))
+
+eaton_acs_tracts <- e_census_tracts %>%
+   left_join(la_county_tracts %>% filter(GEOID %in% e_census_tracts$fips), by = c("fips" = "GEOID"))
+
+```
+
+
+```{r}
+#| echo: false
+#joining acs data to properties
+palisades_acs_properties <- palisades_fire_census_tracts %>%
+  left_join(la_county_tracts %>% filter(GEOID %in% p_census_tracts$fips), by = c("fips" = "GEOID"))
+
+eaton_acs_properties <- eaton_fire_census_tracts %>%
+  left_join(la_county_tracts %>% filter(GEOID %in% e_census_tracts$fips), by = c("fips" = "GEOID"))
+```
+
+
+```{r}
+#| echo: false
+#  reviewing acs variables
+acs_variable_list <- load_variables(year = 2022,
+dataset = "acs5", 
+cache = TRUE) #%>% filter(geography == "block group")
+
+# Vars to fetch from ACS
+# Vars to fetch from ACS
+acs_block_group_vars <- c(
+  total_pop_ = "B01003_001",
+  ethnicity_denom_ = "B03002_001", #total population by race
+  non_hisp_total_ = "B03002_002", 
+  non_hisp_white_ = "B03002_003", 
+  non_hisp_black_ = "B03002_004",
+  non_hisp_native_ = "B03002_005", 
+  non_hisp_asian_ = "B03002_006", 
+  non_hisp_pi_ = "B03002_007",
+  non_hisp_two_ = "B03002_009",
+  hisp_total_ = "B03002_012",
+  
+  # Age
+  age_total_ = "B01001_001", 
+  m_under_5_ = "B01001_003", 
+  m_5_to_9_ = "B01001_004",  
+  m_10_to_14_ = "B01001_005", 
+  m_15_to_17_ = "B01001_006", 
+  m_65_to_66_ = "B01001_020", 
+  m_67_to_69_ = "B01001_021", 
+  m_70_to_74_ = "B01001_022", 
+  m_75_to_79_ = "B01001_023",
+  m_80_to_84_ = "B01001_024", 
+  m_85_plus_ = "B01001_025", 
+  
+  f_under_5_ = "B01001_027", 
+  f_5_to_9_ = "B01001_028",  
+  f_10_to_14_ = "B01001_029", 
+  f_15_to_17_ = "B01001_030", 
+  f_65_to_66_ = "B01001_044", 
+  f_67_to_69_ = "B01001_045", 
+  f_70_to_74_ = "B01001_046", 
+  f_75_to_79_ = "B01001_047",
+  f_80_to_84_ = "B01001_048", 
+  f_85_plus_ = "B01001_049", 
+  
+  # Unemployment
+  civilian_labor_force_ = "B23025_003",
+  unemployed_ = "B23025_005",
+  
+  #household characteristics
+total_housing_units = "B25034_001",
+year_structure_built_2020_or_later = "B25034_002",
+year_structure_built_2010_2019 = "B25034_003",
+year_structure_built_2000_2009 = "B25034_004",
+year_structure_built_1990_1999 = "B25034_005",
+year_structure_built_1980_1989 = "B25034_006",
+year_structure_built_1970_1979 = "B25034_007",
+year_structure_built_1960_1969 = "B25034_008",
+year_structure_built_1950_1959 = "B25034_009",
+year_structure_built_1940_1949 = "B25034_010",
+year_structure_built_1939_or_earlier = "B25034_011",
+avg_hh_size = "B25010_001",
+rooms_per_home = "B25010_002",
+  
+  # Home ownership 
+  tenure_estimate_total_ = "B25003_001", 
+  tenure_owner_occ_ = "B25003_002",
+  
+  # OCCUPANCY STATUS
+  occupancy_total_ = "B25002_001", 
+  occupied_ = "B25002_002", 
+  vacant_ = "B25002_003",
+  
+  # Median household income
+  median_hh_income_ = "B19013_001",
+  
+  # Internet subscription 
+  internet_est_tot_ = "B28002_001", 
+  broadband_ = "B28002_004", 
+  
+  # Gross rent as a percentage of household income
+  gross_rent_est_tot_ = "B25070_001", 
+  gross_rent_30_35_ =  "B25070_007", 
+  gross_rent_35_40_ = "B25070_008", 
+  gross_rent_40_50_ = "B25070_009", 
+  gross_rent_50_plus_ = "B25070_010",
+  gross_rent_not_comp_ = "B25070_011"
+)
+
+
+# Fetch data from census api
+acs_block_groups_df_raw <- get_acs(
+  geography = "block group",
+  variables = acs_block_group_vars,
+  year = 2022,
+  state = "CA",
+  county = 037,
+  survey = "acs5",
+  geometry = FALSE,
+  output = "wide") %>% 
+  clean_names() 
+
+##cleaning acs block group data
+acs_block_groups_clean <- acs_block_groups_df_raw %>% 
+  rename_with(~sub("_e$", "", .), ends_with("_e")) %>% 
+  mutate(
+    # Race and ethnicity
+    per_non_hisp_white = non_hisp_white / ethnicity_denom, 
+    per_non_white = 1 - per_non_hisp_white,
+    per_non_hisp_black = non_hisp_black / ethnicity_denom,
+    per_non_hisp_native = non_hisp_native / ethnicity_denom, 
+    per_non_hisp_asian = non_hisp_asian / ethnicity_denom, 
+    per_non_hisp_pi = non_hisp_pi / ethnicity_denom,
+    per_non_hisp_two = non_hisp_two / ethnicity_denom, 
+    per_hisp = hisp_total / ethnicity_denom,  
+    
+    #age 
+    per_17_under = (m_under_5 + m_5_to_9 + m_10_to_14 + m_15_to_17 +
+                      f_under_5 + f_5_to_9 + f_10_to_14 + f_15_to_17) / age_total,
+    
+    per_65_over = (m_65_to_66 + m_67_to_69 + m_70_to_74 + m_75_to_79 +
+                     m_80_to_84 + m_85_plus + f_65_to_66 + f_67_to_69 + 
+                     f_70_to_74 + f_75_to_79 + f_80_to_84 + f_85_plus)/age_total, 
+    
+    #year structure built 
+    per_housing_pre_1939 = year_structure_built_1939_or_earlier / total_housing_units,
+    per_housing_1940_1970 = (year_structure_built_1940_1949e + year_structure_built_1950_1959e + year_structure_built_1960_1969e + year_structure_built_1970_1979e) / total_housing_units,
+    per_housing_1970_2000 = (year_structure_built_1980_1989e + year_structure_built_1990_1999e) / total_housing_units,
+    per_housing_2000_on = (year_structure_built_2000_2009e + year_structure_built_2010_2019e + year_structure_built_2020_or_later) / total_housing_units,
+
+    
+    # Unemployment rate
+    per_unemp = unemployed / civilian_labor_force,
+    
+    #occupants per room 
+    occ_per_room = avg_hh_size/ rooms_per_home, 
+    
+    # Percent homeowner 
+    per_h_owner = tenure_owner_occ / tenure_estimate_total,
+    
+    # broadband
+    per_broadband = broadband / internet_est_tot, 
+    
+    # occupancy
+    per_occupied = occupied / occupancy_total, 
+    per_vacant = vacant / occupancy_total, 
+    
+    # gross rent 
+    per_gross_rent_30_35 = gross_rent_30_35 / gross_rent_est_tot, 
+    per_gross_rent_35_plus = (gross_rent_35_40 + gross_rent_40_50 + gross_rent_50_plus)/ gross_rent_est_tot,
+    per_rent_burden = (gross_rent_30_35 + gross_rent_35_40 + gross_rent_40_50 + gross_rent_50_plus)/ gross_rent_est_tot
+  ) %>% 
+  select(geoid, total_pop, 
+         median_hh_income,
+         per_non_hisp_white:per_hisp,
+         per_unemp,
+         per_h_owner,
+         per_housing_pre_1939,
+         per_housing_1940_1970,
+         per_housing_1970_2000 ,
+         per_housing_2000_on,
+         occ_per_room, 
+         per_gross_rent_30_35, 
+         per_gross_rent_35_plus, 
+         per_rent_burden, 
+         per_occupied, 
+         per_vacant,
+         per_broadband, 
+         per_17_under, 
+         per_65_over
+  ) 
+
+```
+
+```{r}
+#| echo: false
+#joining acs data to block groups 
+palisades_acs_block_groups <- p_block_groups %>%
+  left_join(acs_block_groups_clean %>% filter(geoid %in% p_block_groups$fips), by = c("fips" = "geoid"))
+
+eaton_acs_block_groups <- e_block_groups %>%
+  left_join(acs_block_groups_clean %>% filter(geoid %in% e_block_groups$fips), by = c("fips" = "geoid"))
+
+```
+
+
+```{r}
+#| echo: false
+#joining acs data to block group properties 
+palisades_acs_properties <- palisades_fire_block_groups %>%
+  left_join(acs_block_groups_clean %>% filter(geoid %in% palisades_fire_block_groups$fips), by = c("fips" = "geoid"))
+
+eaton_acs_properties <- eaton_fire_block_groups %>%
+  left_join(acs_block_groups_clean %>% filter(geoid %in% eaton_fire_block_groups$fips), by = c("fips" = "geoid"))
+
+```
+
